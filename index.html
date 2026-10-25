@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Job Finder</title>
+<style>
+:root{--bg:#eef1f4;--panel:#fff;--ink:#18212b;--mut:#5b6877;--line:#d3dae2;--acc:#0b6e6e;--acc-ink:#fff;--warn:#9a4d00;--warn-bg:#fdeed9;--ok:#0b5d3b;--ok-bg:#dcf3e6;--neu-bg:#e6eaef}
+@media (prefers-color-scheme:dark){:root{--bg:#10161d;--panel:#18202a;--ink:#e7ecf2;--mut:#98a5b4;--line:#2a3441;--acc:#4fc3c3;--acc-ink:#07191a;--warn:#ffc27a;--warn-bg:#3a2a14;--ok:#8fe0b4;--ok-bg:#133124;--neu-bg:#243040}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 "Avenir Next","Segoe UI",system-ui,sans-serif}
+header{padding:20px 24px 8px}
+h1{margin:0;font-size:1.6rem;letter-spacing:-.01em}
+header p{margin:4px 0 0;color:var(--mut);max-width:70ch}
+#notice{margin:12px 24px 0;padding:10px 14px;border-left:4px solid var(--warn);background:var(--warn-bg);border-radius:4px;display:none}
+main{display:grid;grid-template-columns:300px 1fr;gap:24px;padding:16px 24px 40px;align-items:start}
+@media (max-width:820px){main{grid-template-columns:1fr}}
+aside{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;position:sticky;top:12px}
+@media (max-width:820px){aside{position:static}}
+label{display:block;font-weight:600;font-size:.9rem;margin:14px 0 4px}
+label:first-child{margin-top:0}
+input[type=search],select,textarea{width:100%;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);font:inherit}
+textarea{min-height:110px;resize:vertical;font-size:.9rem}
+.check{display:flex;gap:8px;align-items:center;font-weight:400;margin:10px 0 0}
+.check input{width:auto}
+details{margin-top:16px;border-top:1px solid var(--line);padding-top:12px}
+summary{cursor:pointer;font-weight:600}
+.hint{color:var(--mut);font-size:.85rem;margin:6px 0 0}
+button{margin-top:8px;padding:8px 14px;border:0;border-radius:6px;background:var(--acc);color:var(--acc-ink);font:inherit;font-weight:600;cursor:pointer}
+button.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
+:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
+.bar{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap}
+.bar select{width:auto}
+#count{color:var(--mut)}
+.job{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px 16px;margin-bottom:10px}
+.job h2{margin:0;font-size:1.05rem}
+.job h2 a{color:var(--ink);text-decoration:none}
+.job h2 a:hover{text-decoration:underline;color:var(--acc)}
+.meta{color:var(--mut);font-size:.9rem;margin:2px 0 8px}
+.tags{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+.tag{font-size:.8rem;padding:2px 8px;border-radius:999px;background:var(--neu-bg)}
+.tag.warn{background:var(--warn-bg);color:var(--warn)}
+.tag.ok{background:var(--ok-bg);color:var(--ok)}
+.tag.fit{background:var(--acc);color:var(--acc-ink);font-weight:600}
+.snip{margin:0;color:var(--mut);font-size:.92rem}
+.empty{padding:32px;text-align:center;color:var(--mut);background:var(--panel);border:1px dashed var(--line);border-radius:8px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Job Finder</h1>
+  <p>Space and defense jobs in the Huntsville area, filtered by experience, degree, and clearance.</p>
+</header>
+<div id="notice" role="status"></div>
+<main>
+  <aside aria-label="Filters">
+    <label for="q">Keywords</label>
+    <input id="q" type="search" placeholder="e.g. GIS, data, logistics">
+    <p class="hint">Every word must appear in the listing.</p>
+
+    <label for="yrs">Most years of experience required</label>
+    <select id="yrs">
+      <option value="0">None (entry level)</option>
+      <option value="2" selected>Up to 2 years</option>
+      <option value="3">Up to 3 years</option>
+      <option value="5">Up to 5 years</option>
+      <option value="99">Any</option>
+    </select>
+    <label class="check"><input id="unkYrs" type="checkbox" checked> Include listings that don’t state years</label>
+
+    <label for="deg">Highest degree I want to be asked for</label>
+    <select id="deg">
+      <option value="0">None</option>
+      <option value="1">Associate</option>
+      <option value="2" selected>Bachelor’s</option>
+      <option value="3">Master’s</option>
+      <option value="4">PhD</option>
+    </select>
+
+    <label for="clr">Clearance</label>
+    <select id="clr">
+      <option value="notactive" selected>Not required before hire</option>
+      <option value="obtain">Company sponsors after hire</option>
+      <option value="active">Active clearance required to start</option>
+      <option value="unclear">Required, timing unclear</option>
+      <option value="none">No clearance mentioned</option>
+      <option value="any">Any</option>
+    </select>
+
+    <label for="co">Company</label>
+    <select id="co"><option value="">All companies</option></select>
+
+    <label class="check"><input id="local" type="checkbox" checked> Huntsville area only</label>
+
+    <details>
+      <summary>Sort by fit with my resume</summary>
+      <p class="hint">Paste your resume text. It stays in this page and is never uploaded or saved.</p>
+      <textarea id="resume" aria-label="Resume text"></textarea>
+      <button id="fitBtn" type="button">Score listings</button>
+      <button id="clrBtn" type="button" class="ghost">Clear resume</button>
+    </details>
+  </aside>
+
+  <section aria-live="polite">
+    <div class="bar">
+      <span id="count"></span>
+      <label style="margin:0;display:flex;gap:8px;align-items:center">Sort
+        <select id="sort"><option value="new">Newest</option><option value="fit">Best fit</option><option value="yrs">Fewest years</option></select>
+      </label>
+    </div>
+    <div id="list"></div>
+  </section>
+</main>
+
+<script>
+// Sample listings are fake. The real collectors write a file called jobs.json next to this page.
+const SAMPLE=[
+ {id:"s1",company:"Sample Company A",title:"Junior Data Analyst",location:"Huntsville, AL",url:"https://example.com/1",posted:"2026-10-22",source:"sample",years_min:0,years_max:2,degree:"bachelor",clearance_tag:"obtain",clearance_level:"Secret",text:"Entry-level analyst supporting GIS and data management for a missile defense program. Bachelor's degree. Ability to obtain a Secret clearance; company will sponsor. Excel and ArcGIS preferred."},
+ {id:"s2",company:"Sample Company B",title:"Program Support Specialist",location:"Redstone Arsenal, AL",url:"https://example.com/2",posted:"2026-10-20",source:"sample",years_min:2,years_max:4,degree:"bachelor",clearance_tag:"active",clearance_level:"Secret",text:"Supports program management office with scheduling, logistics, and reporting. Requires 2-4 years of experience and an active Secret clearance at start."},
+ {id:"s3",company:"Sample Company C",title:"Systems Engineer",location:"Huntsville, AL",url:"https://example.com/3",posted:"2026-10-18",source:"sample",years_min:8,years_max:null,degree:"master",clearance_tag:"active",clearance_level:"Top Secret",text:"Radar systems engineering. Master's degree and 8+ years of experience. Active Top Secret clearance required."},
+ {id:"s4",company:"Sample Company A",title:"Logistics Coordinator",location:"Madison, AL",url:"https://example.com/4",posted:"2026-10-23",source:"sample",years_min:null,years_max:null,degree:"none",clearance_tag:"none",clearance_level:"",text:"Coordinates shipping, inventory, and records for a small test facility. Microsoft Office and database experience helpful."},
+ {id:"s5",company:"Sample Company D",title:"Software Engineer I",location:"Colorado Springs, CO",url:"https://example.com/5",posted:"2026-10-21",source:"sample",years_min:0,years_max:1,degree:"bachelor",clearance_tag:"obtain",clearance_level:"Secret",text:"Entry-level software role. Bachelor's in computer science. Eligible to obtain a clearance."}
+];
+const DEG={none:0,associate:1,bachelor:2,master:3,phd:4};
+const DEGNAME=["No degree stated","Associate","Bachelor’s","Master’s","PhD"];
+const CLRNAME={active:"Active clearance required to start",obtain:"Clearance sponsored after hire",unclear:"Clearance required, timing unclear",none:"No clearance mentioned"};
+const LOCAL=/huntsville|madison|redstone|decatur|athens|harvest|hazel green|new market|owens cross roads|meridianville/i;
+const STOP=new Set("this that with from will have your you our and the for are who can all any not but job work team able also into their they such more than other must may well".split(" "));
+let JOBS=[], fit=new Map(), $=id=>document.getElementById(id);
+
+function words(t){return new Set((t.toLowerCase().match(/[a-z][a-z+#.\-]{2,}/g)||[]).filter(w=>!STOP.has(w)))}
+function score(){
+  fit.clear(); const r=words($("resume").value); if(!r.size){render();return}
+  for(const j of JOBS){const w=words(j.title+" "+j.title+" "+j.text); if(!w.size)continue;
+    let m=0; for(const x of w) if(r.has(x)) m++; fit.set(j.id,Math.min(99,Math.round(100*m/Math.sqrt(w.size*Math.min(r.size,150)))))}
+  $("sort").value="fit"; render();
+}
+function safeUrl(u){try{const x=new URL(u);return /^https?:$/.test(x.protocol)?x.href:null}catch(e){return null}}
+function el(tag,cls,text){const e=document.createElement(tag); if(cls)e.className=cls; if(text!=null)e.textContent=text; return e}
+
+function render(){
+  const q=$("q").value.toLowerCase().split(/\s+/).filter(Boolean), maxY=+$("yrs").value, unk=$("unkYrs").checked,
+        maxD=+$("deg").value, clr=$("clr").value, co=$("co").value, local=$("local").checked;
+  let out=JOBS.filter(j=>{
+    const hay=(j.title+" "+j.company+" "+j.location+" "+j.text).toLowerCase();
+    if(!q.every(w=>hay.includes(w)))return false;
+    if(j.years_min==null){if(!unk)return false} else if(j.years_min>maxY)return false;
+    if((DEG[j.degree]||0)>maxD)return false;
+    if(clr==="notactive"&&j.clearance_tag==="active")return false;
+    if(!["notactive","any"].includes(clr)&&j.clearance_tag!==clr)return false;
+    if(co&&j.company!==co)return false;
+    if(local&&!LOCAL.test(j.location))return false;
+    return true});
+  const s=$("sort").value;
+  out.sort((a,b)=> s==="fit"?(fit.get(b.id)||0)-(fit.get(a.id)||0) : s==="yrs"?(a.years_min??99)-(b.years_min??99) : (b.posted||"").localeCompare(a.posted||""));
+  $("count").textContent=out.length+" of "+JOBS.length+" listings";
+  const list=$("list"); list.replaceChildren();
+  if(!out.length){list.append(el("div","empty","No listings match. Try raising the years limit or setting clearance to Any."));return}
+  for(const j of out){
+    const card=el("article","job"), h=el("h2"), href=safeUrl(j.url);
+    if(href){const a=el("a",null,j.title); a.href=href; a.target="_blank"; a.rel="noopener noreferrer"; h.append(a)} else h.textContent=j.title;
+    card.append(h, el("div","meta",[j.company,j.location,j.posted].filter(Boolean).join(", ")));
+    const tags=el("div","tags");
+    if(fit.has(j.id)) tags.append(el("span","tag fit","Fit "+fit.get(j.id)+"%"));
+    const yr=j.years_min==null?"Years not stated":(j.years_max&&j.years_max!==j.years_min?j.years_min+"-"+j.years_max+" years":j.years_min===0?"No experience required":j.years_min+"+ years");
+    tags.append(el("span","tag",yr), el("span","tag",DEGNAME[DEG[j.degree]||0]));
+    const ct=el("span","tag "+(j.clearance_tag==="active"?"warn":j.clearance_tag==="obtain"?"ok":""),(CLRNAME[j.clearance_tag]||"No clearance mentioned")+(j.clearance_level?" ("+j.clearance_level+")":""));
+    tags.append(ct);
+    if(j.review&&j.review.length) tags.append(el("span","tag warn","Check the listing text"));
+    card.append(tags);
+    card.append(el("p","snip",(j.text||"").slice(0,240)+((j.text||"").length>240?"...":"")));
+    list.append(card);
+  }
+}
+async function init(){
+  let sample=false;
+  try{const r=await fetch("jobs.json",{cache:"no-store"}); if(!r.ok)throw 0; JOBS=await r.json()}
+  catch(e){JOBS=SAMPLE; sample=true}
+  if(sample){const n=$("notice"); n.style.display="block"; n.textContent="Showing fake sample listings. Real listings appear once the collectors have produced jobs.json."}
+  const sel=$("co"); [...new Set(JOBS.map(j=>j.company))].sort().forEach(c=>{const o=el("option",null,c); o.value=c; sel.append(o)});
+  for(const id of ["q","yrs","unkYrs","deg","clr","co","local","sort"]) $(id).addEventListener(id==="q"?"input":"change",render);
+  $("fitBtn").addEventListener("click",score);
+  $("clrBtn").addEventListener("click",()=>{$("resume").value=""; fit.clear(); if($("sort").value==="fit")$("sort").value="new"; render()});
+  render();
+}
+init();
+</script>
+</body>
+</html>

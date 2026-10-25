@@ -77,6 +77,17 @@ button.ghost{background:transparent;color:var(--ink);border:1px solid var(--line
       <option value="4">PhD</option>
     </select>
 
+    <label for="fld">My degree field</label>
+    <select id="fld">
+      <option value="any">Any</option>
+      <option value="business" selected>Business and management</option>
+      <option value="engineering">Engineering</option>
+      <option value="computer">Computer and IT</option>
+      <option value="math_science">Math and science</option>
+      <option value="geospatial">Geospatial</option>
+    </select>
+    <p class="hint">Hides listings that name a different field. Listings that name no field stay.</p>
+
     <label for="clr">Clearance</label>
     <select id="clr">
       <option value="notactive" selected>Not required before hire</option>
@@ -122,6 +133,7 @@ const SAMPLE=[
  {id:"s5",company:"Sample Company D",title:"Software Engineer I",location:"Colorado Springs, CO",url:"https://example.com/5",posted:"2026-10-21",source:"sample",years_min:0,years_max:1,degree:"bachelor",clearance_tag:"obtain",clearance_level:"Secret",text:"Entry-level software role. Bachelor's in computer science. Eligible to obtain a clearance."}
 ];
 const DEG={none:0,associate:1,bachelor:2,master:3,phd:4};
+const FLDNAME={business:"Business and management",engineering:"Engineering",computer:"Computer and IT",math_science:"Math and science",geospatial:"Geospatial",any:"Any field"};
 const DEGNAME=["No degree stated","Associate","Bachelor’s","Master’s","PhD"];
 const CLRNAME={active:"Active clearance required to start",obtain:"Clearance sponsored after hire",unclear:"Clearance required, timing unclear",none:"No clearance mentioned"};
 const LOCAL=/huntsville|madison|redstone|decatur|athens|harvest|hazel green|new market|owens cross roads|meridianville/i;
@@ -140,12 +152,14 @@ function el(tag,cls,text){const e=document.createElement(tag); if(cls)e.classNam
 
 function render(){
   const q=$("q").value.toLowerCase().split(/\s+/).filter(Boolean), maxY=+$("yrs").value, unk=$("unkYrs").checked,
-        maxD=+$("deg").value, clr=$("clr").value, co=$("co").value, local=$("local").checked;
+        maxD=+$("deg").value, fld=$("fld").value, clr=$("clr").value, co=$("co").value, local=$("local").checked;
   let out=JOBS.filter(j=>{
     const hay=(j.title+" "+j.company+" "+j.location+" "+j.text).toLowerCase();
     if(!q.every(w=>hay.includes(w)))return false;
     if(j.years_min==null){if(!unk)return false} else if(j.years_min>maxY)return false;
     if((DEG[j.degree]||0)>maxD)return false;
+    const jf=j.degree_fields||[];
+    if(fld!=="any"&&jf.length&&!jf.includes("any")&&!jf.includes(fld))return false;
     if(clr==="notactive"&&j.clearance_tag==="active")return false;
     if(!["notactive","any"].includes(clr)&&j.clearance_tag!==clr)return false;
     if(co&&j.company!==co)return false;
@@ -163,7 +177,9 @@ function render(){
     const tags=el("div","tags");
     if(fit.has(j.id)) tags.append(el("span","tag fit","Fit "+fit.get(j.id)+"%"));
     const yr=j.years_min==null?"Years not stated":(j.years_max&&j.years_max!==j.years_min?j.years_min+"-"+j.years_max+" years":j.years_min===0?"No experience required":j.years_min+"+ years");
-    tags.append(el("span","tag",yr), el("span","tag",DEGNAME[DEG[j.degree]||0]));
+    const jf=(j.degree_fields||[]).map(f=>FLDNAME[f]).filter(Boolean);
+    tags.append(el("span","tag",yr), el("span","tag",DEGNAME[DEG[j.degree]||0]+(jf.length?" in "+jf.join(", "):"")));
+    if(j.degree_equiv) tags.append(el("span","tag ok","Experience can substitute for degree"));
     const ct=el("span","tag "+(j.clearance_tag==="active"?"warn":j.clearance_tag==="obtain"?"ok":""),(CLRNAME[j.clearance_tag]||"No clearance mentioned")+(j.clearance_level?" ("+j.clearance_level+")":""));
     tags.append(ct);
     if(j.review&&j.review.length) tags.append(el("span","tag warn","Check the listing text"));
@@ -178,7 +194,7 @@ async function init(){
   catch(e){JOBS=SAMPLE; sample=true}
   if(sample){const n=$("notice"); n.style.display="block"; n.textContent="Showing fake sample listings. Real listings appear once the collectors have produced jobs.json."}
   const sel=$("co"); [...new Set(JOBS.map(j=>j.company))].sort().forEach(c=>{const o=el("option",null,c); o.value=c; sel.append(o)});
-  for(const id of ["q","yrs","unkYrs","deg","clr","co","local","sort"]) $(id).addEventListener(id==="q"?"input":"change",render);
+  for(const id of ["q","yrs","unkYrs","deg","fld","clr","co","local","sort"]) $(id).addEventListener(id==="q"?"input":"change",render);
   $("fitBtn").addEventListener("click",score);
   $("clrBtn").addEventListener("click",()=>{$("resume").value=""; fit.clear(); if($("sort").value==="fit")$("sort").value="new"; render()});
   render();

@@ -10,7 +10,7 @@ OUT = "jobs.json"
 UA = "JobFinderPersonal/1.0 (personal job search; public pages only)"
 DELAY = 1.5          # seconds between requests
 MAX_TEXT = 8000      # characters of description kept per listing (extraction always uses the full text)
-VER = 3              # bump when extraction rules change so old listings get re-read
+VER = 4              # bump when extraction rules change so old listings get re-read
 LOCAL = re.compile(r"huntsville|madison|redstone|decatur|athens|harvest|hazel green|new market|owens cross roads|meridianville", re.I)
 TODAY = datetime.date.today().isoformat()
 

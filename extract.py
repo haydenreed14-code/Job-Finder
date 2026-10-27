@@ -46,10 +46,29 @@ def _normalize_years(t):
     return re.sub(r"\((\d{1,2})\)(?=\s*(?:\+|plus|or more)?\s*(?:years?|yrs?)\b)", r"\1", t)
 
 
+LADDER = re.compile(r"\b(junior|jr|entry|mid|journeyman|senior|sr|sme|principal|lead)\b[ \t]*[:\-\u2013]?[ \t]*(\d{1,2})[ \t]*(?:-|\u2013|\u2014|to)[ \t]*(\d{1,2})[ \t]*\+?", re.I)
+LEVELKEY = {"junior": "junior", "jr": "junior", "entry": "junior", "mid": "mid", "journeyman": "mid",
+            "senior": "senior", "sr": "senior", "lead": "senior", "sme": "sme", "principal": "sme"}
+NOYRS = re.compile(r"(\d{1,2})\s*(?:-|\u2013|\u2014|to)\s*(\d{1,2})\s*\+?\s+of\s+(?:[\w,-]+\s+){0,3}?experience", re.I)
+GENERIC = re.compile(r"(?:years?|yrs?)\s+(?:of\s+)?(?:relevant|related|professional|work|total|overall|progressively)\b|\d\s+of\s+progressively", re.I)
+
+
 def years(title, text):
     t = _normalize_years(re.sub(r"[ \t\r\f\v]+", " ", text))
-    found = []
-    for m in YRS.finditer(t):
+    ladder = {}  # listings that give a range for each level: Junior 2-5, Mid 5-8, Senior 8-10
+    for m in LADDER.finditer(t):
+        ladder.setdefault(LEVELKEY[m.group(1).lower()], (int(m.group(2)), int(m.group(3))))
+    if len(ladder) >= 2:
+        tl = title.lower()
+        for word, key in LEVELKEY.items():
+            if key in ladder and re.search(r"\b%s\b" % word, tl):
+                return ladder[key][0], ladder[key][1], []
+        lo = min(ladder.values())
+        return lo[0], lo[1], ["years"]
+    cands = [(m, int(m.group(1)), int(m.group(2)) if m.group(2) else None) for m in YRS.finditer(t)]
+    cands += [(m, int(m.group(1)), int(m.group(2))) for m in NOYRS.finditer(t)]
+    req, pref = [], []
+    for m, lo, hi in sorted(cands, key=lambda c: c[0].start()):
         win = t[max(0, m.start() - 90): m.end() + 90]
         if not re.search(r"experience|experienced|\bexp\b", win, re.I):
             continue
@@ -57,13 +76,18 @@ def years(title, text):
         se = [i for i in (t.find(c, m.end()) for c in ".;\n\u2022") if i != -1]
         sent = t[sb + 1: min(se) if se else len(t)]
         label_free = re.sub(r"preferred\s+(?:years\s+of\s+)?experience(?:\s+range)?", " ", sent, flags=re.I)  # a label, not a preference
-        if PREF.search(label_free) or BOILER.search(sent):
+        if BOILER.search(sent):
             continue
-        found.append((int(m.group(1)), int(m.group(2)) if m.group(2) else None))
-    if not found:
-        return (0, None, []) if ENTRY.search(title + " " + text) else (None, None, [])
-    review = ["years"] if len({f[0] for f in found}) > 1 else []
-    return found[0][0], found[0][1], review
+        if PREF.search(label_free):
+            if GENERIC.search(sent):  # "10-12 years of relevant experience is desired": general level, keep but flag
+                pref.append((lo, hi))
+            continue
+        req.append((lo, hi))
+    if req:
+        return req[0][0], req[0][1], (["years"] if len({f[0] for f in req}) > 1 else [])
+    if pref:
+        return pref[0][0], pref[0][1], ["years"]
+    return (0, None, []) if ENTRY.search(title + " " + text) else (None, None, [])
 
 
 def degree(text):

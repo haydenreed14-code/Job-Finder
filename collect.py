@@ -188,17 +188,20 @@ def collect_usajobs(known):
     if not key or not email:
         raise RuntimeError("the USAJOBS_KEY and USAJOBS_EMAIL secrets are not set")
     headers = {"Host": "data.usajobs.gov", "User-Agent": email, "Authorization-Key": key}
-    out, page = [], 1
+    out, page, total, dropped = [], 1, 0, {}
     while page <= 10:
         q = urllib.parse.urlencode({"LocationName": "Huntsville, Alabama", "Radius": 30, "WhoMayApply": "public",
                                     "ResultsPerPage": 100, "Page": page})
         data = fetch_json("https://data.usajobs.gov/api/search?" + q, headers=headers, robots=False)
-        items = data.get("SearchResult", {}).get("SearchResultItems", [])
+        res = data.get("SearchResult", {})
+        items = res.get("SearchResultItems", [])
+        total = res.get("SearchResultCountAll") or total
         for it in items:
             d = it.get("MatchedObjectDescriptor", {})
             det = d.get("UserArea", {}).get("Details", {})
             org = d.get("OrganizationName") or d.get("DepartmentName") or "Federal"
             if not FEDERAL_KEEP.search(org + " " + d.get("DepartmentName", "")):
+                dropped[org] = dropped.get(org, 0) + 1
                 continue
             jid, u = f"usajobs:{it.get('MatchedObjectId')}", d.get("PositionURI", "")
             if jid in known:
@@ -217,6 +220,8 @@ def collect_usajobs(known):
         if len(items) < 100:
             break
         page += 1
+    top = ", ".join(f"{k} ({v})" for k, v in sorted(dropped.items(), key=lambda x: -x[1])[:8])
+    print(f"usajobs detail: the API reported {total} public listings near Huntsville; {sum(dropped.values())} were skipped as not defense/space. Skipped agencies: {top or 'none'}")
     return out
 
 def collect_workday(host, tenant, site, known):

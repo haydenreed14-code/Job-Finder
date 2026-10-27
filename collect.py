@@ -21,6 +21,7 @@ SOURCES = [
     ("peopletec-rccto", "PeopleTec", "icims", dict(host="rccto-careers-peopletec.icims.com")),
     ("decibel", "Decibel Research", "applicantpro_api", dict(host="decibelresearch.applicantpro.com", client_id="10639")),
     ("torch", "Torch Technologies", "workday", dict(host="starfish.wd501.myworkdayjobs.com", tenant="starfish", site="Careers")),
+    ("usajobs", "USAJOBS", "usajobs", dict()),
     # Northrop is left out on purpose: its robots.txt asks automated tools not to use the data feed.
 ]
 
@@ -42,20 +43,21 @@ def allowed(url):
     rp = _robots[root]
     return rp is None or rp.can_fetch(UA, url)
 
-def fetch(url, body=None):
-    if not allowed(url):
+def fetch(url, body=None, headers=None, robots=True):
+    if robots and not allowed(url):
         raise RuntimeError("robots.txt does not allow " + url)
     time.sleep(DELAY)
-    headers = {"User-Agent": UA, "Accept": "application/json, text/html;q=0.9"}
+    hdrs = {"User-Agent": UA, "Accept": "application/json, text/html;q=0.9"}
+    hdrs.update(headers or {})
     data = None
     if body is not None:
         data = json.dumps(body).encode()
-        headers["Content-Type"] = "application/json"
-    req = urllib.request.Request(url, data=data, headers=headers)
+        hdrs["Content-Type"] = "application/json"
+    req = urllib.request.Request(url, data=data, headers=hdrs)
     return opener.open(req, timeout=40).read().decode("utf-8", "ignore")
 
-def fetch_json(url, body=None):
-    return json.loads(fetch(url, body))
+def fetch_json(url, body=None, **kw):
+    return json.loads(fetch(url, body, **kw))
 
 # ---- text helpers ----
 def strip_html(s):
@@ -175,6 +177,48 @@ def collect_applicantpro_api(host, client_id, known):
         out.append(dict(id=key, url=u, title=title, location=loc, posted=posted, text=text))
     return out
 
+FEDERAL_KEEP = re.compile(r"army|navy|air force|defense|aeronautics|space|missile|marine", re.I)
+
+def _s(v):
+    return "\n".join(str(x) for x in v) if isinstance(v, list) else str(v or "")
+
+def collect_usajobs(known):
+    """Official USAJOBS Search API (free key). Keys come from GitHub secrets, never from the code."""
+    key, email = os.environ.get("USAJOBS_KEY", ""), os.environ.get("USAJOBS_EMAIL", "")
+    if not key or not email:
+        raise RuntimeError("the USAJOBS_KEY and USAJOBS_EMAIL secrets are not set")
+    headers = {"Host": "data.usajobs.gov", "User-Agent": email, "Authorization-Key": key}
+    out, page = [], 1
+    while page <= 10:
+        q = urllib.parse.urlencode({"LocationName": "Huntsville, Alabama", "Radius": 30, "WhoMayApply": "public",
+                                    "ResultsPerPage": 100, "Page": page})
+        data = fetch_json("https://data.usajobs.gov/api/search?" + q, headers=headers, robots=False)
+        items = data.get("SearchResult", {}).get("SearchResultItems", [])
+        for it in items:
+            d = it.get("MatchedObjectDescriptor", {})
+            det = d.get("UserArea", {}).get("Details", {})
+            org = d.get("OrganizationName") or d.get("DepartmentName") or "Federal"
+            if not FEDERAL_KEEP.search(org + " " + d.get("DepartmentName", "")):
+                continue
+            jid, u = f"usajobs:{it.get('MatchedObjectId')}", d.get("PositionURI", "")
+            if jid in known:
+                out.append(dict(id=jid, url=u, reuse=True))
+                continue
+            locs = "; ".join(l.get("LocationName", "") for l in d.get("PositionLocation", []) if isinstance(l, dict)) \
+                or d.get("PositionLocationDisplay", "")
+            clr = _s(det.get("SecurityClearance"))
+            parts = [_s(det.get("JobSummary")), "Qualifications: " + _s(d.get("QualificationSummary")),
+                     "Education: " + _s(det.get("Education")), "Requirements: " + _s(det.get("Requirements")),
+                     _s(det.get("MajorDuties"))]
+            if clr and not re.search(r"not required|none|unspecified|n/?a|other", clr, re.I):
+                parts.append("Security clearance: " + clr + ".")
+            out.append(dict(id=jid, url=u, company=org + " (federal)", title=d.get("PositionTitle", ""), location=locs,
+                            posted=str(d.get("PublicationStartDate", ""))[:10], text=strip_html("\n".join(parts))))
+        if len(items) < 100:
+            break
+        page += 1
+    return out
+
 def collect_workday(host, tenant, site, known):
     base = f"https://{host}/wday/cxs/{tenant}/{site}"
     out, offset = [], 0
@@ -224,7 +268,7 @@ def collect_eightfold(host, domain, where, known):
             break
     return out
 
-COLLECTORS = {"icims": collect_icims, "applicantpro": collect_applicantpro, "applicantpro_api": collect_applicantpro_api,
+COLLECTORS = {"icims": collect_icims, "applicantpro": collect_applicantpro, "applicantpro_api": collect_applicantpro_api, "usajobs": collect_usajobs,
               "workday": collect_workday, "eightfold": collect_eightfold}
 
 # ---- main ----
@@ -248,7 +292,7 @@ def main():
                 if r.get("location") and not LOCAL.search(r["location"]):
                     continue
                 full = r.get("text") or ""
-                job = dict(id=r["id"], company=company, source=label, title=r.get("title", "").strip(),
+                job = dict(id=r["id"], company=r.get("company") or company, source=label, title=r.get("title", "").strip(),
                            location=r.get("location", ""), url=r["url"], first_seen=TODAY, ver=VER,
                            posted=r.get("posted") or TODAY, text=full[:MAX_TEXT])
                 job.update(analyze(job["title"], full))

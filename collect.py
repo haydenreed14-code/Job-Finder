@@ -25,6 +25,8 @@ SOURCES = [
     ("thompson-gray", "Thompson Gray", "applicantpro_api", dict(host="thompsongrayinc.applicantpro.com")),
     ("oasys", "OASYS", "applicantpro_api", dict(host="oasysincorporated.applicantpro.com")),
     ("avion", "Avion Solutions", "teamtailor", dict(host="avionsolutions.na.teamtailor.com")),
+    ("cfd", "CFD Research", "greenhouse", dict(page="https://www.cfd-research.com/jobs/", guesses=["cfdresearch", "cfdresearchcorporation", "cfd-research"])),
+    ("mtsi", "MTSI", "eightfold", dict(host="talent.mtsi-va.com", domain="mtsi-va.com", where="Huntsville, AL")),
     ("usajobs", "USAJOBS", "usajobs", dict()),
     # Northrop is left out on purpose: its robots.txt asks automated tools not to use the data feed.
 ]
@@ -223,6 +225,42 @@ def collect_teamtailor(host, known):
         out.append(dict(id=jid, url=link, title=title, location=loc, posted=posted, text=text))
     return out
 
+def collect_greenhouse(known, page=None, token=None, guesses=()):
+    """Greenhouse publishes an official public job board API. The board name is found on the company's page
+    (or guessed from the names in `guesses`)."""
+    tokens = [token] if token else []
+    if page and not token:
+        try:
+            html_ = fetch(page)
+            m = re.search(r"greenhouse\.io/embed/job_board(?:/js)?\?for=([A-Za-z0-9_-]+)", html_) or \
+                re.search(r"(?:boards|job-boards)\.greenhouse\.io/(?!embed)([A-Za-z0-9_-]+)", html_)
+            if m:
+                tokens.append(m.group(1))
+        except Exception:
+            pass
+    tokens += [g for g in guesses if g not in tokens]
+    data = None
+    for t in tokens:
+        try:  # an official API meant for programs, so no robots.txt check
+            data = fetch_json(f"https://boards-api.greenhouse.io/v1/boards/{t}/jobs?content=true", robots=False)
+        except Exception:
+            continue
+        if isinstance(data, dict) and "jobs" in data:
+            break
+        data = None
+    if data is None:
+        raise RuntimeError("could not find the Greenhouse job board; tried: " + ", ".join(tokens))
+    out = []
+    for j in data["jobs"]:
+        jid = f"gh:{j.get('id')}"
+        u = j.get("absolute_url", "")
+        if jid in known:
+            out.append(dict(id=jid, url=u, reuse=True))
+            continue
+        out.append(dict(id=jid, url=u, title=j.get("title", ""), location=(j.get("location") or {}).get("name", ""),
+                        posted=str(j.get("updated_at", ""))[:10], text=strip_html(html.unescape(j.get("content", "")))))
+    return out
+
 FEDERAL_KEEP = re.compile(r"army|navy|air force|defense|aeronautics|space|missile|marine", re.I)
 
 def _s(v):
@@ -319,7 +357,7 @@ def collect_eightfold(host, domain, where, known):
             break
     return out
 
-COLLECTORS = {"icims": collect_icims, "applicantpro": collect_applicantpro, "applicantpro_api": collect_applicantpro_api, "usajobs": collect_usajobs, "teamtailor": collect_teamtailor,
+COLLECTORS = {"icims": collect_icims, "applicantpro": collect_applicantpro, "applicantpro_api": collect_applicantpro_api, "usajobs": collect_usajobs, "teamtailor": collect_teamtailor, "greenhouse": collect_greenhouse,
               "workday": collect_workday, "eightfold": collect_eightfold}
 
 # ---- main ----

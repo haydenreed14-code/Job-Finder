@@ -68,7 +68,7 @@ button.ghost{background:transparent;color:var(--ink);border:1px solid var(--line
     </select>
     <label class="check"><input id="unkYrs" type="checkbox" checked> Include listings that don’t state years</label>
 
-    <label for="deg">Highest degree I want to be asked for</label>
+    <label for="deg">Highest degree level to allow</label>
     <select id="deg">
       <option value="0">None</option>
       <option value="1">Associate</option>
@@ -76,6 +76,7 @@ button.ghost{background:transparent;color:var(--ink);border:1px solid var(--line
       <option value="3">Master’s</option>
       <option value="4">PhD</option>
     </select>
+    <p class="hint">"None" hides every listing that asks for a degree. Choose PhD to hide nothing.</p>
 
     <label for="fld">My degree field</label>
     <select id="fld">
@@ -102,6 +103,8 @@ button.ghost{background:transparent;color:var(--ink);border:1px solid var(--line
     <select id="co"><option value="">All companies</option></select>
 
     <label class="check"><input id="local" type="checkbox" checked> Huntsville area only</label>
+
+    <button id="allBtn" type="button" class="ghost">Show everything</button>
 
     <details>
       <summary>Sort by fit with my resume</summary>
@@ -195,6 +198,10 @@ async function init(){
   if(sample){const n=$("notice"); n.style.display="block"; n.textContent="Showing fake sample listings. Real listings appear once the collectors have produced jobs.json."}
   const sel=$("co"); [...new Set(JOBS.map(j=>j.company))].sort().forEach(c=>{const o=el("option",null,c); o.value=c; sel.append(o)});
   for(const id of ["q","yrs","unkYrs","deg","fld","clr","co","local","sort"]) $(id).addEventListener(id==="q"?"input":"change",render);
+  $("allBtn").addEventListener("click",()=>{
+    $("q").value=""; $("yrs").value="99"; $("unkYrs").checked=true; $("deg").value="4"; $("fld").value="any";
+    $("clr").value="any"; $("co").value=""; $("local").checked=false; render();
+  });
   $("fitBtn").addEventListener("click",score);
   $("clrBtn").addEventListener("click",()=>{$("resume").value=""; fit.clear(); if($("sort").value==="fit")$("sort").value="new"; render()});
   render();

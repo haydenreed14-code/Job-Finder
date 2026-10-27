@@ -5,15 +5,15 @@ If one source breaks, its previous listings are kept and the others still update
 import datetime, html, http.cookiejar, json, os, re, time
 import urllib.parse, urllib.request, urllib.robotparser
 from extract import analyze
- 
+
 OUT = "jobs.json"
 UA = "JobFinderPersonal/1.0 (personal job search; public pages only)"
 DELAY = 1.5          # seconds between requests
 MAX_TEXT = 8000      # characters of description kept per listing (extraction always uses the full text)
-VER = 2              # bump when extraction rules change so old listings get re-read
+VER = 3              # bump when extraction rules change so old listings get re-read
 LOCAL = re.compile(r"huntsville|madison|redstone|decatur|athens|harvest|hazel green|new market|owens cross roads|meridianville", re.I)
 TODAY = datetime.date.today().isoformat()
- 
+
 # ---- the sources (add a line here to add a company that uses a supported system) ----
 SOURCES = [
     ("peopletec-main", "PeopleTec", "icims", dict(host="careers-peopletec.icims.com")),
@@ -23,11 +23,11 @@ SOURCES = [
     ("torch", "Torch Technologies", "workday", dict(host="starfish.wd501.myworkdayjobs.com", tenant="starfish", site="Careers")),
     # Northrop is left out on purpose: its robots.txt asks automated tools not to use the data feed.
 ]
- 
+
 # ---- polite fetching ----
 opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
 _robots = {}
- 
+
 def allowed(url):
     p = urllib.parse.urlsplit(url)
     root = f"{p.scheme}://{p.netloc}"
@@ -41,7 +41,7 @@ def allowed(url):
         _robots[root] = rp
     rp = _robots[root]
     return rp is None or rp.can_fetch(UA, url)
- 
+
 def fetch(url, body=None):
     if not allowed(url):
         raise RuntimeError("robots.txt does not allow " + url)
@@ -53,17 +53,17 @@ def fetch(url, body=None):
         headers["Content-Type"] = "application/json"
     req = urllib.request.Request(url, data=data, headers=headers)
     return opener.open(req, timeout=40).read().decode("utf-8", "ignore")
- 
+
 def fetch_json(url, body=None):
     return json.loads(fetch(url, body))
- 
+
 # ---- text helpers ----
 def strip_html(s):
     s = re.sub(r"(?is)<(script|style).*?</\1>", " ", s or "")
     s = re.sub(r"(?i)<br\s*/?>|</(p|li|div|h\d|tr)>", "\n", s)
     s = html.unescape(re.sub(r"<[^>]+>", " ", s))
     return re.sub(r"[ \t\r\f\v]+", " ", re.sub(r"\n\s*", "\n", s)).strip()
- 
+
 def jobposting(page):
     """Most career pages embed a machine-readable JobPosting block. Returns (title, location, posted, text) or None."""
     for blob in re.findall(r'(?is)<script[^>]*application/ld\+json[^>]*>(.*?)</script>', page):
@@ -80,16 +80,16 @@ def jobposting(page):
                 place = ", ".join(x for x in [addr.get("addressLocality"), addr.get("addressRegion")] if x) if isinstance(addr, dict) else ""
                 return (d.get("title", ""), place, (d.get("datePosted") or "")[:10], strip_html(d.get("description", "")))
     return None
- 
+
 def page_fallback(page):
     t = re.search(r"(?is)<h1[^>]*>(.*?)</h1>", page) or re.search(r"(?is)<title>(.*?)</title>", page)
     return (strip_html(t.group(1)) if t else "", "", "", strip_html(page))
- 
+
 # ---- collectors: each returns a list of dicts with id, url, title, location, posted, text ----
 def get_detail(url):
     page = fetch(url)
     return jobposting(page) or page_fallback(page)
- 
+
 def collect_icims(host, known):
     ids = {}
     for pg in range(40):
@@ -108,7 +108,7 @@ def collect_icims(host, known):
         title, loc, posted, text = get_detail(u)
         out.append(dict(id=f"icims:{host}:{i}", url=u, title=title, location=loc, posted=posted, text=text))
     return out
- 
+
 def collect_applicantpro(host, known):
     page = fetch(f"https://{host}/jobs/")
     links = sorted(set(re.findall(r'href="((?:https://[^"/]+)?/jobs/\d+-\d+\.html)"', page)))
@@ -122,7 +122,7 @@ def collect_applicantpro(host, known):
         title, loc, posted, text = get_detail(u)
         out.append(dict(id=jid, url=u, title=title, location=loc, posted=posted, text=text))
     return out
- 
+
 def _find_jobs(node):
     """Finds the first list of job-like records anywhere inside a JSON reply."""
     if isinstance(node, list):
@@ -138,7 +138,7 @@ def _find_jobs(node):
             if r:
                 return r
     return None
- 
+
 def collect_applicantpro_api(host, client_id, known):
     """ApplicantPro pages load their job list from /core/jobs/<id>. UNVERIFIED guess at the reply format,
     so if it cannot be read, the error shows the start of the reply."""
@@ -174,7 +174,7 @@ def collect_applicantpro_api(host, client_id, known):
                 pass
         out.append(dict(id=key, url=u, title=title, location=loc, posted=posted, text=text))
     return out
- 
+
 def collect_workday(host, tenant, site, known):
     base = f"https://{host}/wday/cxs/{tenant}/{site}"
     out, offset = [], 0
@@ -198,7 +198,7 @@ def collect_workday(host, tenant, site, known):
         if offset >= data.get("total", 0):
             break
     return out
- 
+
 def collect_eightfold(host, domain, where, known):
     """UNVERIFIED against the live site: the endpoint below is the common Eightfold pattern."""
     out, start = [], 0
@@ -223,10 +223,10 @@ def collect_eightfold(host, domain, where, known):
         if start >= data.get("count", 0):
             break
     return out
- 
+
 COLLECTORS = {"icims": collect_icims, "applicantpro": collect_applicantpro, "applicantpro_api": collect_applicantpro_api,
               "workday": collect_workday, "eightfold": collect_eightfold}
- 
+
 # ---- main ----
 def main():
     try:
@@ -272,6 +272,6 @@ def main():
     json.dump(results, open(OUT, "w"), indent=1)
     print("\n".join(report))
     print(f"Wrote {len(results)} listings to {OUT}")
- 
+
 if __name__ == "__main__":
     main()

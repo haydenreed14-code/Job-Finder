@@ -1,14 +1,14 @@
 """Reads years of experience, degree, and clearance out of a job listing's text.
 Plain pattern matching, no AI. Anything it is unsure about is flagged in "review"."""
 import re
- 
+
 SPLIT = re.compile(r"[.;\n\u2022\u00b7]+|\s-\s")
 PREF = re.compile(r"\b(prefer|preferred|desired|desirable|a plus|nice to have|bonus|advantage|helpful)\b", re.I)
 BOILER = re.compile(r"\b(our company|we have|we are|founded|since \d{4}|for over|for more than)\b|\bhas\s+(?:over|more than|nearly|almost)\s+\d+", re.I)
 RANGE = re.compile(r"(\d{1,2})\s*\+?\s*(?:-|\u2013|\u2014|to)\s*(\d{1,2})\s*\+?\s*(?:years?|yrs?)\b", re.I)
 ANY_YRS = re.compile(r"(\d{1,2})\s*\+?\s*(?:years?|yrs?)\b", re.I)
 ENTRY = re.compile(r"entry[- ]level|no experience (?:is )?(?:required|needed)|recent graduate|new grad", re.I)
- 
+
 DEGREES = [  # (name, pattern, case-insensitive?)
     ("phd", r"\b(?:ph\.?d\.?|doctorate|doctoral)\b", True),
     ("master", r"\b(?:master'?s?|M\.S\.|MBA)\b", True),
@@ -17,7 +17,7 @@ DEGREES = [  # (name, pattern, case-insensitive?)
     ("associate", r"\bassociate'?s?\s+(?:degree|of)\b", True),
 ]
 RANK = {"none": 0, "associate": 1, "bachelor": 2, "master": 3, "phd": 4}
- 
+
 CLR_ANY = re.compile(r"\b(clearance|top secret|ts/sci|secret|public trust|polygraph)\b", re.I)
 ACTIVE = re.compile(
     r"\b(?:active|current|existing|interim|valid)\s+(?:\w+\s+){0,2}?(?:secret|top secret|ts|clearance|public trust)"
@@ -27,25 +27,25 @@ ACTIVE = re.compile(
 OBTAIN = re.compile(
     r"\b(?:ability|able|eligible|eligibility|willing|willingness|can)\s+(?:to\s+)?(?:\w+\s+){0,3}?(?:obtain|acquire|be\s+granted|qualify)"
     r"|\bobtain(?:ed)?\s+(?:and|or)\s+maintain|\bwill\s+sponsor|\bsponsor(?:ed|ship)?\b|\beligible\s+for\s+(?:a\s+|an\s+)?(?:\w+\s+){0,2}clearance", re.I)
- 
- 
+
+
 def _sentences(text):
     return [s.strip() for s in SPLIT.split(text) if s.strip()]
- 
- 
+
+
 NUMW = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9,
         "ten": 10, "twelve": 12, "fifteen": 15, "twenty": 20}
 YRS = re.compile(r"(\d{1,2})\s*(?:\+|plus|or more)?\s*(?:(?:-|\u2013|\u2014|to)\s*(\d{1,2})\s*\+?\s*)?(?:years?|yrs?)\b", re.I)
- 
- 
+
+
 def _normalize_years(t):
     t = re.sub(r"\b(yrs?)\.", r"\1", t, flags=re.I)
     words = "|".join(NUMW)
     t = re.sub(r"\b(%s)\b(?:\s*\(\d+\))?(?=\s*(?:\+|plus|or more)?\s*(?:-|to)?\s*(?:\d{1,2}\s*)?(?:years?|yrs?)\b)" % words,
                lambda m: str(NUMW[m.group(1).lower()]), t, flags=re.I)
     return re.sub(r"\((\d{1,2})\)(?=\s*(?:\+|plus|or more)?\s*(?:years?|yrs?)\b)", r"\1", t)
- 
- 
+
+
 def years(title, text):
     t = _normalize_years(re.sub(r"[ \t\r\f\v]+", " ", text))
     found = []
@@ -56,15 +56,16 @@ def years(title, text):
         sb = max(t.rfind(c, 0, m.start()) for c in ".;\n\u2022")
         se = [i for i in (t.find(c, m.end()) for c in ".;\n\u2022") if i != -1]
         sent = t[sb + 1: min(se) if se else len(t)]
-        if PREF.search(sent) or BOILER.search(sent):
+        label_free = re.sub(r"preferred\s+(?:years\s+of\s+)?experience(?:\s+range)?", " ", sent, flags=re.I)  # a label, not a preference
+        if PREF.search(label_free) or BOILER.search(sent):
             continue
         found.append((int(m.group(1)), int(m.group(2)) if m.group(2) else None))
     if not found:
         return (0, None, []) if ENTRY.search(title + " " + text) else (None, None, [])
     review = ["years"] if len({f[0] for f in found}) > 1 else []
     return found[0][0], found[0][1], review
- 
- 
+
+
 def degree(text):
     names = set()
     for s in _sentences(text):
@@ -74,8 +75,8 @@ def degree(text):
             if re.search(pat, s, re.I if ci else 0):
                 names.add(name)
     return min(names, key=RANK.get) if names else "none"
- 
- 
+
+
 def clearance(text):
     m = re.search(r"CLEARANCE REQUIRED FOR START:\s*(Yes|No)", text, re.I)
     t = re.search(r"CLEARANCE TYPE:\s*([A-Za-z/ ]{2,40})", text, re.I)
@@ -95,8 +96,8 @@ def clearance(text):
     if OBTAIN.search(text):
         return "obtain", level, []
     return "unclear", level, ["clearance"]
- 
- 
+
+
 def _level(t):
     if re.search(r"\bsci\b", t, re.I):
         return "TS/SCI"
@@ -107,8 +108,8 @@ def _level(t):
     if re.search(r"public trust", t, re.I):
         return "Public Trust"
     return ""
- 
- 
+
+
 FIELDS = {
     "business": r"business|management|finance|accounting|economics|marketing|logistics|supply chain|operations|administration",
     "engineering": r"engineering|stem",
@@ -119,8 +120,8 @@ FIELDS = {
 ANY_FIELD = re.compile(r"any (?:field|discipline|major)|any related|unspecified", re.I)
 EQUIV = re.compile(r"or equivalent|equivalent (?:work |professional |relevant |military )?experience|in lieu of|may substitute|can substitute", re.I)
 DEG_ANY = re.compile(r"bachelor|master|ph\.?d|doctorate|associate|\bdegree\b|\bB\.?S\.?\b|\bB\.?A\.?\b|\bBBA\b|\bMBA\b", re.I)
- 
- 
+
+
 def degree_fields(text):
     out = set()
     for m in DEG_ANY.finditer(text):
@@ -133,8 +134,8 @@ def degree_fields(text):
         if ANY_FIELD.search(seg):
             out.add("any")
     return sorted(out)
- 
- 
+
+
 def analyze(title, text):
     ymin, ymax, r1 = years(title, text)
     tag, level, r2 = clearance(text)

@@ -26,6 +26,12 @@ SOURCES = [
     ("oasys", "OASYS", "applicantpro_api", dict(host="oasysincorporated.applicantpro.com")),
     ("avion", "Avion Solutions", "teamtailor", dict(host="avionsolutions.na.teamtailor.com")),
     ("cfd", "CFD Research", "greenhouse", dict(page="https://www.cfd-research.com/jobs/", guesses=["cfdresearch", "cfdresearchcorporation", "cfd-research"])),
+    ("parsons", "Parsons", "workday", dict(host="parsons.wd5.myworkdayjobs.com", tenant="parsons", site="Search", search="Huntsville")),
+    ("i3", "Integration Innovation (i3)", "i3", dict()),
+    ("trideum", "Trideum", "clearcompany", dict(site_id="231f6d36-4d59-b184-40dd-926d85241f83")),
+    ("penta", "Penta Research", "adp", dict(cid="024bd63a-6563-446c-b238-b86ad9443c97", cc_id="19000101_000001")),
+    # Left out on purpose because their robots.txt asks automated tools to stay away:
+    # Aviation & Missile Solutions (submit4jobs) and ARA (UKG/UltiPro).
     # MTSI is left out too: its robots.txt also asks automated tools not to use the job data feed.
     ("usajobs", "USAJOBS", "usajobs", dict()),
     # Northrop is left out on purpose: its robots.txt asks automated tools not to use the data feed.
@@ -308,11 +314,11 @@ def collect_usajobs(known):
     print(f"usajobs detail: the API reported {total} public listings near Huntsville; {sum(dropped.values())} were skipped as not defense/space. Skipped agencies: {top or 'none'}")
     return out
 
-def collect_workday(host, tenant, site, known):
+def collect_workday(host, tenant, site, known, search=""):
     base = f"https://{host}/wday/cxs/{tenant}/{site}"
     out, offset = [], 0
     while True:
-        data = fetch_json(base + "/jobs", {"appliedFacets": {}, "limit": 20, "offset": offset, "searchText": ""})
+        data = fetch_json(base + "/jobs", {"appliedFacets": {}, "limit": 20, "offset": offset, "searchText": search})
         posts = data.get("jobPostings", [])
         if not posts:
             break
@@ -320,6 +326,9 @@ def collect_workday(host, tenant, site, known):
             path = p["externalPath"]
             jid = f"wd:{host}:{path}"
             u = f"https://{host}/{site}{path}"
+            lt = p.get("locationsText", "")
+            if lt and not LOCAL.search(lt) and not re.search(r"\d+\s+locations", lt, re.I):
+                continue  # clearly elsewhere: don't spend a request on it
             if jid in known:
                 out.append(dict(id=jid, url=u, reuse=True))
                 continue
@@ -357,8 +366,78 @@ def collect_eightfold(host, domain, where, known):
             break
     return out
 
+def collect_i3(known):
+    """i3 publishes its openings as a public file at /data/jobs.json (robots.txt allows it)."""
+    data = fetch_json("https://i3-corps.com/data/jobs.json")
+    def flat(v):
+        if isinstance(v, list):
+            return "\n".join(flat(x) for x in v)
+        if isinstance(v, dict):
+            return "\n".join(flat(x) for x in v.values())
+        return str(v or "")
+    out = []
+    for j in data.get("jobs", []):
+        jid = f"i3:{j.get('id')}"
+        u = j.get("applyUrl") or "https://i3-corps.com/careers"
+        if jid in known:
+            out.append(dict(id=jid, url=u, reuse=True))
+            continue
+        loc = "; ".join(j.get("locations") or []) or j.get("location", "")
+        text = "\n".join(flat(j.get(k)) for k in ("overview", "responsibilities", "qualifications"))
+        if j.get("clearance"):
+            text += "\nSecurity clearance: " + str(j["clearance"]) + "."
+        out.append(dict(id=jid, url=u, title=j.get("title", ""), location=loc,
+                        posted=str(j.get("updatedAt", ""))[:10], text=strip_html(text)))
+    return out
+
+def collect_clearcompany(site_id, known):
+    """ClearCompany's public careers API, the same one the company's job page uses."""
+    out, page = [], 0
+    while page < 20:
+        data = fetch_json(f"https://careers-api.clearcompany.com/v1/{site_id}?pageIndex={page}&pageSize=50&source=CJB-0")
+        res = data.get("results", [])
+        for r in res:
+            jid = f"cc:{r.get('id')}"
+            u = (r.get("applyLink") or "").replace("/apply?", "?")
+            if jid in known:
+                out.append(dict(id=jid, url=u, reuse=True))
+                continue
+            locs = "; ".join(", ".join(x for x in (l.get("city"), l.get("subdivision")) if x)
+                             for l in (r.get("locations") or []) if isinstance(l, dict)) or r.get("location", "")
+            out.append(dict(id=jid, url=u, title=r.get("positionTitle", ""), location=locs,
+                            posted=str(r.get("postedDate", ""))[:10], text=strip_html(r.get("description", ""))))
+        page += 1
+        if not res or page * 50 >= data.get("totalCount", 0):
+            break
+    return out
+
+def collect_adp(cid, cc_id, known):
+    """ADP Workforce Now's public career-center feed, the same one the company's job page uses."""
+    base = "https://workforcenow.adp.com/mascsr/default/careercenter/public/events/staffing/v1/job-requisitions"
+    q = urllib.parse.urlencode({"cid": cid, "ccId": cc_id, "lang": "en_US", "locale": "en_US"})
+    page_url = ("https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html?"
+                + urllib.parse.urlencode({"cid": cid, "ccId": cc_id, "type": "JS", "lang": "en_US"}))
+    data = fetch_json(f"{base}?{q}&$top=100")
+    out = []
+    for r in data.get("jobRequisitions", []):
+        jid = f"adp:{cid}:{r.get('itemID')}"
+        ext = next((f.get("stringValue") for f in (r.get("customFieldGroup") or {}).get("stringFields", [])
+                    if (f.get("nameCode") or {}).get("codeValue") == "ExternalJobID" and f.get("stringValue")), None)
+        u = page_url + (f"&jobId={ext}" if ext else "")
+        if jid in known:
+            out.append(dict(id=jid, url=u, reuse=True))
+            continue
+        locs = "; ".join(", ".join(x for x in ((l.get("address") or {}).get("cityName"),
+                                               ((l.get("address") or {}).get("countrySubdivisionLevel1") or {}).get("codeValue")) if x)
+                         for l in (r.get("requisitionLocations") or []))
+        det = fetch_json(f"{base}/{r.get('itemID')}?{q}")
+        out.append(dict(id=jid, url=u, title=r.get("requisitionTitle", ""), location=locs,
+                        posted=str(r.get("postDate", ""))[:10], text=strip_html(det.get("requisitionDescription", ""))))
+    return out
+
 COLLECTORS = {"icims": collect_icims, "applicantpro": collect_applicantpro, "applicantpro_api": collect_applicantpro_api, "usajobs": collect_usajobs, "teamtailor": collect_teamtailor, "greenhouse": collect_greenhouse,
-              "workday": collect_workday, "eightfold": collect_eightfold}
+              "workday": collect_workday, "eightfold": collect_eightfold,
+              "i3": collect_i3, "clearcompany": collect_clearcompany, "adp": collect_adp}
 
 # ---- main ----
 def main():

@@ -26,7 +26,7 @@ SOURCES = [
     ("oasys", "OASYS", "applicantpro_api", dict(host="oasysincorporated.applicantpro.com")),
     ("avion", "Avion Solutions", "teamtailor", dict(host="avionsolutions.na.teamtailor.com")),
     ("cfd", "CFD Research", "greenhouse", dict(page="https://www.cfd-research.com/jobs/", guesses=["cfdresearch", "cfdresearchcorporation", "cfd-research"])),
-    ("mtsi", "MTSI", "eightfold", dict(host="talent.mtsi-va.com", domain="mtsi-va.com", where="Huntsville, AL")),
+    # MTSI is left out too: its robots.txt also asks automated tools not to use the job data feed.
     ("usajobs", "USAJOBS", "usajobs", dict()),
     # Northrop is left out on purpose: its robots.txt asks automated tools not to use the data feed.
 ]

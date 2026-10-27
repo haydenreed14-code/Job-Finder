@@ -43,6 +43,10 @@ button.ghost{background:transparent;color:var(--ink);border:1px solid var(--line
 .tag.ok{background:var(--ok-bg);color:var(--ok)}
 .tag.fit{background:var(--acc);color:var(--acc-ink);font-weight:600}
 .snip{margin:0;color:var(--mut);font-size:.92rem}
+.coTools{display:flex;gap:6px;margin-bottom:6px}
+button.small{padding:3px 10px;font-size:.85rem;margin:0}
+#coBox{max-height:210px;overflow:auto;border:1px solid var(--line);border-radius:6px;padding:4px 8px;background:var(--bg)}
+#coBox label{margin:6px 0;font-size:.9rem}
 .empty{padding:32px;text-align:center;color:var(--mut);background:var(--panel);border:1px dashed var(--line);border-radius:8px}
 </style>
 </head>
@@ -99,8 +103,10 @@ button.ghost{background:transparent;color:var(--ink);border:1px solid var(--line
       <option value="any">Any</option>
     </select>
 
-    <label for="co">Company</label>
-    <select id="co"><option value="">All companies</option></select>
+    <label id="coLabel">Companies</label>
+    <div class="coTools"><button type="button" class="ghost small" id="coAll">Select all</button><button type="button" class="ghost small" id="coNone">Select none</button></div>
+    <div id="coBox" role="group" aria-labelledby="coLabel"></div>
+    <p class="hint">Uncheck a company to hide its listings. Your choices are remembered in this browser.</p>
 
     <label class="check"><input id="local" type="checkbox" checked> Huntsville area only</label>
 
@@ -151,11 +157,23 @@ function score(){
   $("sort").value="fit"; render();
 }
 function safeUrl(u){try{const x=new URL(u);return /^https?:$/.test(x.protocol)?x.href:null}catch(e){return null}}
+let excluded=new Set();
+try{excluded=new Set(JSON.parse(localStorage.getItem("jf_excluded")||"[]"))}catch(e){}
+function saveExcluded(){try{localStorage.setItem("jf_excluded",JSON.stringify([...excluded]))}catch(e){}}
+function companyCounts(){const c={}; JOBS.forEach(j=>{c[j.company]=(c[j.company]||0)+1}); return c}
+function buildCompanies(){
+  const box=$("coBox"), counts=companyCounts(); box.replaceChildren();
+  Object.keys(counts).sort().forEach(name=>{
+    const l=el("label","check"), cb=document.createElement("input"); cb.type="checkbox"; cb.checked=!excluded.has(name);
+    cb.addEventListener("change",()=>{cb.checked?excluded.delete(name):excluded.add(name); saveExcluded(); render()});
+    l.append(cb, document.createTextNode(name+" ("+counts[name]+")")); box.append(l);
+  });
+}
 function el(tag,cls,text){const e=document.createElement(tag); if(cls)e.className=cls; if(text!=null)e.textContent=text; return e}
 
 function render(){
   const q=$("q").value.toLowerCase().split(/\s+/).filter(Boolean), maxY=+$("yrs").value, unk=$("unkYrs").checked,
-        maxD=+$("deg").value, fld=$("fld").value, clr=$("clr").value, co=$("co").value, local=$("local").checked;
+        maxD=+$("deg").value, fld=$("fld").value, clr=$("clr").value, local=$("local").checked;
   let out=JOBS.filter(j=>{
     const hay=(j.title+" "+j.company+" "+j.location+" "+j.text).toLowerCase();
     if(!q.every(w=>hay.includes(w)))return false;
@@ -165,7 +183,7 @@ function render(){
     if(fld!=="any"&&jf.length&&!jf.includes("any")&&!jf.includes(fld))return false;
     if(clr==="notactive"&&j.clearance_tag==="active")return false;
     if(!["notactive","any"].includes(clr)&&j.clearance_tag!==clr)return false;
-    if(co&&j.company!==co)return false;
+    if(excluded.has(j.company))return false;
     if(local&&!LOCAL.test(j.location))return false;
     return true});
   const s=$("sort").value;
@@ -196,12 +214,14 @@ async function init(){
   try{const r=await fetch("jobs.json",{cache:"no-store"}); if(!r.ok)throw 0; JOBS=await r.json()}
   catch(e){JOBS=SAMPLE; sample=true}
   if(sample){const n=$("notice"); n.style.display="block"; n.textContent="Showing fake sample listings. Real listings appear once the collectors have produced jobs.json."}
-  const sel=$("co"); [...new Set(JOBS.map(j=>j.company))].sort().forEach(c=>{const o=el("option",null,c); o.value=c; sel.append(o)});
-  for(const id of ["q","yrs","unkYrs","deg","fld","clr","co","local","sort"]) $(id).addEventListener(id==="q"?"input":"change",render);
+  buildCompanies();
+  for(const id of ["q","yrs","unkYrs","deg","fld","clr","local","sort"]) $(id).addEventListener(id==="q"?"input":"change",render);
   $("allBtn").addEventListener("click",()=>{
     $("q").value=""; $("yrs").value="99"; $("unkYrs").checked=true; $("deg").value="4"; $("fld").value="any";
-    $("clr").value="any"; $("co").value=""; $("local").checked=false; render();
+    $("clr").value="any"; $("local").checked=false; excluded.clear(); saveExcluded(); buildCompanies(); render();
   });
+  $("coAll").addEventListener("click",()=>{excluded.clear(); saveExcluded(); buildCompanies(); render()});
+  $("coNone").addEventListener("click",()=>{Object.keys(companyCounts()).forEach(n=>excluded.add(n)); saveExcluded(); buildCompanies(); render()});
   $("fitBtn").addEventListener("click",score);
   $("clrBtn").addEventListener("click",()=>{$("resume").value=""; fit.clear(); if($("sort").value==="fit")$("sort").value="new"; render()});
   render();

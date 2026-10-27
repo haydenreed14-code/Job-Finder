@@ -2,7 +2,8 @@
 """Collects public job listings and writes jobs.json (read by index.html).
 Standard library only. Public pages only, no logins, slow request rate, robots.txt respected.
 If one source breaks, its previous listings are kept and the others still update."""
-import datetime, html, http.cookiejar, json, os, re, time
+import datetime, email.utils, html, http.cookiejar, json, os, re, time
+import xml.etree.ElementTree as ET
 import urllib.parse, urllib.request, urllib.robotparser
 from extract import analyze
 
@@ -21,6 +22,9 @@ SOURCES = [
     ("peopletec-rccto", "PeopleTec", "icims", dict(host="rccto-careers-peopletec.icims.com")),
     ("decibel", "Decibel Research", "applicantpro_api", dict(host="decibelresearch.applicantpro.com", client_id="10639")),
     ("torch", "Torch Technologies", "workday", dict(host="starfish.wd501.myworkdayjobs.com", tenant="starfish", site="Careers")),
+    ("thompson-gray", "Thompson Gray", "applicantpro_api", dict(host="thompsongrayinc.applicantpro.com")),
+    ("oasys", "OASYS", "applicantpro_api", dict(host="oasysincorporated.applicantpro.com")),
+    ("avion", "Avion Solutions", "teamtailor", dict(host="avionsolutions.na.teamtailor.com")),
     ("usajobs", "USAJOBS", "usajobs", dict()),
     # Northrop is left out on purpose: its robots.txt asks automated tools not to use the data feed.
 ]
@@ -141,9 +145,18 @@ def _find_jobs(node):
                 return r
     return None
 
-def collect_applicantpro_api(host, client_id, known):
+def _ap_client_id(host):
+    page = fetch(f"https://{host}/jobs/")
+    for pat in (r"/core/jobs/(\d+)", r"/images/\d+/(\d+)/", r"domain_?id[\"']?\s*[:=]\s*[\"']?(\d+)", r"clientId[\"']?\s*[:=]\s*[\"']?(\d+)"):
+        m = re.search(pat, page, re.I)
+        if m:
+            return m.group(1)
+    raise RuntimeError("could not find the ApplicantPro company number on " + host)
+
+def collect_applicantpro_api(host, known, client_id=None):
     """ApplicantPro pages load their job list from /core/jobs/<id>. UNVERIFIED guess at the reply format,
     so if it cannot be read, the error shows the start of the reply."""
+    client_id = client_id or _ap_client_id(host)
     last, jobs = "", None
     for params in ("%7B%7D", "%7B%22filters%22%3A%7B%7D%7D"):
         raw = fetch(f"https://{host}/core/jobs/{client_id}?getParams={params}")
@@ -175,6 +188,39 @@ def collect_applicantpro_api(host, client_id, known):
             except Exception:
                 pass
         out.append(dict(id=key, url=u, title=title, location=loc, posted=posted, text=text))
+    return out
+
+def _local(tag):
+    return tag.split("}")[-1]
+
+def collect_teamtailor(host, known):
+    """Teamtailor documents a public RSS feed of jobs at /jobs.rss."""
+    root = ET.fromstring(fetch(f"https://{host}/jobs.rss"))
+    out = []
+    for it in root.iter("item"):
+        kid = {_local(c.tag): (c.text or "").strip() for c in it}
+        link, title = kid.get("link", ""), kid.get("title", "")
+        jid = f"tt:{host}:{kid.get('guid') or link}"
+        if jid in known:
+            out.append(dict(id=jid, url=link, reuse=True))
+            continue
+        places = []
+        for el in it.iter():
+            if _local(el.tag) == "location":
+                places += [(c.text or "").strip() for c in el if _local(c.tag) in ("city", "name", "state")]
+        loc = ", ".join(dict.fromkeys(x for x in places if x))
+        try:
+            posted = email.utils.parsedate_to_datetime(kid.get("pubDate", "")).date().isoformat()
+        except Exception:
+            posted = ""
+        text = strip_html(kid.get("description", ""))
+        if len(text) < 300 and link:  # short summary: read the job page itself
+            try:
+                t2, l2, p2, text2 = get_detail(link)
+                text, loc, posted = text2 or text, loc or l2, posted or p2
+            except Exception:
+                pass
+        out.append(dict(id=jid, url=link, title=title, location=loc, posted=posted, text=text))
     return out
 
 FEDERAL_KEEP = re.compile(r"army|navy|air force|defense|aeronautics|space|missile|marine", re.I)
@@ -273,7 +319,7 @@ def collect_eightfold(host, domain, where, known):
             break
     return out
 
-COLLECTORS = {"icims": collect_icims, "applicantpro": collect_applicantpro, "applicantpro_api": collect_applicantpro_api, "usajobs": collect_usajobs,
+COLLECTORS = {"icims": collect_icims, "applicantpro": collect_applicantpro, "applicantpro_api": collect_applicantpro_api, "usajobs": collect_usajobs, "teamtailor": collect_teamtailor,
               "workday": collect_workday, "eightfold": collect_eightfold}
 
 # ---- main ----

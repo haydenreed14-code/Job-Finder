@@ -30,6 +30,22 @@ SOURCES = [
     ("i3", "Integration Innovation (i3)", "i3", dict()),
     ("trideum", "Trideum", "clearcompany", dict(site_id="231f6d36-4d59-b184-40dd-926d85241f83")),
     ("penta", "Penta Research", "adp", dict(cid="024bd63a-6563-446c-b238-b86ad9443c97", cc_id="19000101_000001")),
+    ("yulista-dss", "Defense Systems and Solutions (Yulista)", "workday", dict(host="calistacorp.wd1.myworkdayjobs.com", tenant="calistacorp", site="Yulista", search="Huntsville")),
+    ("intuitive", "Intuitive Research and Technology", "workday", dict(host="intuitive.wd1.myworkdayjobs.com", tenant="intuitive", site="irtc_careers")),
+    ("bluehalo", "BlueHalo (AeroVironment)", "workday", dict(host="avav.wd1.myworkdayjobs.com", tenant="avav", site="AVAV", search="Huntsville")),
+    ("griffon", "Griffon Aerospace", "applicantpro_api", dict(host="griffonaerospace.applicantpro.com")),
+    ("simtech", "Simulation Technologies", "applicantpro_api", dict(host="simtechinc.applicantpro.com")),
+    ("rgnext", "Range Generation Next", "adp", dict(cid="24e7d80d-26d8-4462-8cde-9f67f19162b6", cc_id="2745255261_3556")),
+    ("ntsi", "NTSI", "adp", dict(cid="9e26f425-d064-4c19-9e7b-cc8236837a7c", cc_id="19000101_000001")),
+    ("tactica", "Tactica Solutions", "icims", dict(host="careers-tactica-solutions.icims.com")),
+    ("amentum", "Amentum", "sitemap", dict(sitemap="https://www.amentumcareers.com/sitemap.xml", prefix="amentum",
+        keep=r"/jobs/.*(huntsville|redstone-arsenal|madison-alabama|decatur-alabama|athens-alabama)")),
+    ("astrion", "Astrion (Joint Technical Solutions)", "jibe", dict(host="careers.astrion.us", where="Huntsville, AL")),
+    ("is4s", "IS4S", "links", dict(list_url="https://jobs.avahr.com/embed/jobs/5AE46E57-5517-CC18-478F-F75B52CFCC2F?logo=1&header=1&filters=1",
+        pattern=r"#/job_details/(\d+)", detail_url="https://jobs.avahr.com/41534-integrated-solutions-for-systems-inc/{}-job/", prefix="is4s")),
+    ("s3", "System Studies & Simulation (S3)", "links", dict(list_url="https://phe.tbe.taleo.net/phe01/ats/careers/v2/searchResults?org=S3INC&cws=38",
+        pattern=r"viewRequisition\?org=S3INC&(?:amp;)?cws=38&(?:amp;)?rid=(\d+)", detail_url="https://phe.tbe.taleo.net/phe01/ats/careers/v2/viewRequisition?org=S3INC&cws=38&rid={}", prefix="s3")),
+    # Sigmatech uses submit4jobs, whose robots.txt also turns away automated tools.
     # Left out on purpose because their robots.txt asks automated tools to stay away:
     # Aviation & Missile Solutions (submit4jobs) and ARA (UKG/UltiPro).
     # MTSI is left out too: its robots.txt also asks automated tools not to use the job data feed.
@@ -55,10 +71,18 @@ def allowed(url):
     rp = _robots[root]
     return rp is None or rp.can_fetch(UA, url)
 
+def crawl_delay(url):
+    p = urllib.parse.urlsplit(url)
+    rp = _robots.get(f"{p.scheme}://{p.netloc}")
+    try:
+        return float(rp.crawl_delay(UA) or 0) if rp else 0
+    except Exception:
+        return 0
+
 def fetch(url, body=None, headers=None, robots=True):
     if robots and not allowed(url):
         raise RuntimeError("robots.txt does not allow " + url)
-    time.sleep(DELAY)
+    time.sleep(max(DELAY, crawl_delay(url) if robots else 0))
     hdrs = {"User-Agent": UA, "Accept": "application/json, text/html;q=0.9"}
     hdrs.update(headers or {})
     data = None
@@ -435,9 +459,62 @@ def collect_adp(cid, cc_id, known):
                         posted=str(r.get("postDate", ""))[:10], text=strip_html(det.get("requisitionDescription", ""))))
     return out
 
+def collect_links(list_url, pattern, detail_url, known, prefix):
+    """Reads a job list page, finds each job's number, then reads each job's own page."""
+    page = fetch(list_url)
+    ids = list(dict.fromkeys(re.findall(pattern, page)))
+    if not ids:
+        raise RuntimeError("found no jobs on " + list_url)
+    out = []
+    for i in ids:
+        u, jid = detail_url.format(i), f"{prefix}:{i}"
+        if jid in known:
+            out.append(dict(id=jid, url=u, reuse=True))
+            continue
+        title, loc, posted, text = get_detail(u)
+        out.append(dict(id=jid, url=u, title=title, location=loc, posted=posted, text=text))
+    return out
+
+def collect_sitemap(sitemap, keep, known, prefix):
+    """Reads a site's public sitemap, keeps job pages whose address mentions the area, and reads each one."""
+    xml_ = fetch(sitemap)
+    urls = [u for u in re.findall(r"<loc>([^<]+)</loc>", xml_) if re.search(keep, u, re.I)]
+    out = []
+    for u in urls:
+        jid = f"{prefix}:{u.rstrip('/').rsplit('/', 1)[-1]}"
+        if jid in known:
+            out.append(dict(id=jid, url=u, reuse=True))
+            continue
+        title, loc, posted, text = get_detail(u)
+        out.append(dict(id=jid, url=u, title=title, location=loc, posted=posted, text=text))
+    return out
+
+def collect_jibe(host, where, known):
+    """Jibe career sites (used by Astrion) serve their job list at /api/jobs."""
+    out, page = [], 1
+    while page <= 10:
+        q = urllib.parse.urlencode({"location": where, "limit": 100, "page": page})
+        data = fetch_json(f"https://{host}/api/jobs?{q}")
+        jobs = data.get("jobs", [])
+        for j in jobs:
+            d = j.get("data", j)
+            jid = f"jibe:{host}:{d.get('req_id') or d.get('slug')}"
+            u = f"https://{host}/jobs/{d.get('slug')}"
+            if jid in known:
+                out.append(dict(id=jid, url=u, reuse=True))
+                continue
+            loc = d.get("full_location") or ", ".join(x for x in (d.get("city"), d.get("state")) if x)
+            text = "\n".join(str(d.get(k) or "") for k in ("description", "qualifications", "responsibilities"))
+            out.append(dict(id=jid, url=u, title=d.get("title", ""), location=loc,
+                            posted=str(d.get("posted_date", ""))[:10], text=strip_html(text)))
+        if len(jobs) < 100:
+            break
+        page += 1
+    return out
+
 COLLECTORS = {"icims": collect_icims, "applicantpro": collect_applicantpro, "applicantpro_api": collect_applicantpro_api, "usajobs": collect_usajobs, "teamtailor": collect_teamtailor, "greenhouse": collect_greenhouse,
               "workday": collect_workday, "eightfold": collect_eightfold,
-              "i3": collect_i3, "clearcompany": collect_clearcompany, "adp": collect_adp}
+              "i3": collect_i3, "links": collect_links, "sitemap": collect_sitemap, "jibe": collect_jibe, "clearcompany": collect_clearcompany, "adp": collect_adp}
 
 # ---- main ----
 def main():

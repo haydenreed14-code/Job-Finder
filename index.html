@@ -47,6 +47,32 @@ button.ghost{background:transparent;color:var(--ink);border:1px solid var(--line
 button.small{padding:3px 10px;font-size:.85rem;margin:0}
 #coBox{max-height:210px;overflow:auto;border:1px solid var(--line);border-radius:6px;padding:4px 8px;background:var(--bg)}
 #coBox label{margin:6px 0;font-size:.9rem}
+nav.tabs{display:flex;gap:4px;padding:0 24px;border-bottom:1px solid var(--line)}
+nav.tabs button{margin:0;border-radius:6px 6px 0 0;background:transparent;color:var(--mut);border:1px solid transparent;border-bottom:0;padding:8px 16px}
+nav.tabs button[aria-selected=true]{background:var(--panel);color:var(--ink);border-color:var(--line);position:relative;top:1px}
+.jobhead{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
+.star{margin:0;padding:4px 10px;font-size:.85rem;background:transparent;color:var(--ink);border:1px solid var(--line);white-space:nowrap}
+.star.on{background:var(--ok-bg);color:var(--ok);border-color:var(--ok)}
+#tracker{padding:16px 24px 40px;max-width:1100px}
+.stats{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.stats button{margin:0;background:var(--panel);color:var(--ink);border:1px solid var(--line);font-weight:500}
+.stats button[aria-pressed=true]{background:var(--acc);color:var(--acc-ink);border-color:var(--acc)}
+.stats b{font-size:1.05rem;margin-right:4px}
+.trow{display:grid;grid-template-columns:1fr 170px;gap:8px 16px}
+@media (max-width:640px){.trow{grid-template-columns:1fr}}
+.trow textarea{min-height:60px}
+.trow input[type=date]{width:100%;padding:6px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);font:inherit}
+.small-label{font-size:.8rem;font-weight:600;color:var(--mut);margin:6px 0 2px;display:block}
+.gone{color:var(--warn);font-size:.85rem}
+.tools{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px;align-items:center}
+.tools button{margin:0}
+.tag.new{background:#c2410c;color:#fff;font-weight:700}
+@media (prefers-color-scheme:dark){.tag.new{background:#fb923c;color:#1a0d00}}
+.btns{display:flex;gap:6px;flex-shrink:0}
+.hidebtn{margin:0;padding:4px 10px;font-size:.85rem;background:transparent;color:var(--mut);border:1px solid var(--line);white-space:nowrap}
+.job.dim{opacity:.6}
+.newbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.newbar button{margin:0}
 .empty{padding:32px;text-align:center;color:var(--mut);background:var(--panel);border:1px dashed var(--line);border-radius:8px}
 </style>
 </head>
@@ -56,7 +82,11 @@ button.small{padding:3px 10px;font-size:.85rem;margin:0}
   <p>Space and defense jobs in the Huntsville area, filtered by experience, degree, and clearance.</p>
 </header>
 <div id="notice" role="status"></div>
-<main>
+<nav class="tabs" role="tablist" aria-label="Views">
+  <button id="tabSearch" role="tab" aria-selected="true" aria-controls="searchView">Search</button>
+  <button id="tabSaved" role="tab" aria-selected="false" aria-controls="tracker">My saved jobs (<span id="savedCount">0</span>)</button>
+</nav>
+<main id="searchView" role="tabpanel" aria-labelledby="tabSearch">
   <aside aria-label="Filters">
     <label for="q">Keywords</label>
     <input id="q" type="search" placeholder="e.g. GIS, data, logistics">
@@ -110,6 +140,9 @@ button.small{padding:3px 10px;font-size:.85rem;margin:0}
 
     <label class="check"><input id="local" type="checkbox" checked> Huntsville area only</label>
 
+    <label class="check"><input id="onlyNew" type="checkbox"> Only jobs new since my last visit</label>
+    <label class="check"><input id="showHidden" type="checkbox"> Show jobs I've hidden (<span id="hiddenCount">0</span>)</label>
+
     <button id="allBtn" type="button" class="ghost">Show everything</button>
 
     <details>
@@ -123,7 +156,7 @@ button.small{padding:3px 10px;font-size:.85rem;margin:0}
 
   <section aria-live="polite">
     <div class="bar">
-      <span id="count"></span>
+      <span class="newbar"><span id="count"></span><span id="newInfo"></span><button type="button" class="ghost small" id="seenBtn" hidden>Mark all as seen</button></span>
       <label style="margin:0;display:flex;gap:8px;align-items:center">Sort
         <select id="sort"><option value="new">Newest</option><option value="fit">Best fit</option><option value="yrs">Fewest years</option></select>
       </label>
@@ -131,6 +164,16 @@ button.small{padding:3px 10px;font-size:.85rem;margin:0}
     <div id="list"></div>
   </section>
 </main>
+
+<section id="tracker" role="tabpanel" aria-labelledby="tabSaved" hidden>
+  <div class="stats" id="stats" role="group" aria-label="Filter by status"></div>
+  <div id="tlist"></div>
+  <div class="tools">
+    <button type="button" class="ghost" id="exportBtn">Download backup</button>
+    <label class="ghost" style="margin:0"><span class="hint" style="margin-right:6px">Restore backup:</span><input type="file" id="importFile" accept="application/json,.json"></label>
+  </div>
+  <p class="hint">Saved jobs and notes are kept in this browser only. Use "Download backup" now and then, and "Restore backup" to move them to another device or browser.</p>
+</section>
 
 <script>
 // Sample listings are fake. The real collectors write a file called jobs.json next to this page.
@@ -169,11 +212,107 @@ function buildCompanies(){
     l.append(cb, document.createTextNode(name+" ("+counts[name]+")")); box.append(l);
   });
 }
+// ---- "new since last visit" (kept in this browser) ----
+// A visit is a browser session: the badges stay put while you click around, and roll forward the next time you open the page.
+let prevIds=null, newIds=new Set();
+function startVisit(){
+  let cur=null, prev=null;
+  try{cur=JSON.parse(localStorage.getItem("jf_cur_ids")||"null"); prev=JSON.parse(localStorage.getItem("jf_prev_ids")||"null")}catch(e){}
+  let fresh=false; try{fresh=!sessionStorage.getItem("jf_visit")}catch(e){fresh=true}
+  const ids=JOBS.map(j=>j.id);
+  if(fresh){ prev=cur; try{sessionStorage.setItem("jf_visit","1"); localStorage.setItem("jf_prev_ids",JSON.stringify(prev)); localStorage.setItem("jf_cur_ids",JSON.stringify(ids))}catch(e){} }
+  prevIds=prev?new Set(prev):null;
+  newIds=new Set(prevIds?ids.filter(id=>!prevIds.has(id)):[]);
+}
+function markAllSeen(){
+  const ids=JOBS.map(j=>j.id); newIds.clear(); prevIds=new Set(ids);
+  try{localStorage.setItem("jf_prev_ids",JSON.stringify(ids)); localStorage.setItem("jf_cur_ids",JSON.stringify(ids))}catch(e){}
+  $("onlyNew").checked=false; render();
+}
+// ---- jobs you've hidden (kept in this browser) ----
+let dismissed={};
+try{dismissed=JSON.parse(localStorage.getItem("jf_dismissed")||"{}")||{}}catch(e){dismissed={}}
+function saveDismissed(){try{localStorage.setItem("jf_dismissed",JSON.stringify(dismissed))}catch(e){}}
+function isHidden(j){return !!dismissed[j.id]||(saved[j.id]&&saved[j.id].status==="withdrawn")}
+function toggleHide(j){
+  if(dismissed[j.id]) delete dismissed[j.id]; else dismissed[j.id]={title:j.title,company:j.company,on:new Date().toISOString().slice(0,10)};
+  saveDismissed(); render();
+}
+// ---- saved jobs and application tracking (kept in this browser) ----
+const STATUSES=[["saved","Saved"],["applied","Applied"],["interview","Interviewing"],["offer","Offer"],["rejected","Rejected"],["withdrawn","Not interested"]];
+const STATUSNAME=Object.fromEntries(STATUSES);
+let saved={}, statusFilter="all";
+try{saved=JSON.parse(localStorage.getItem("jf_saved")||"{}")||{}}catch(e){saved={}}
+function persist(){try{localStorage.setItem("jf_saved",JSON.stringify(saved))}catch(e){}; $("savedCount").textContent=Object.keys(saved).length}
+function today(){return new Date().toISOString().slice(0,10)}
+function toggleSave(j){
+  if(saved[j.id]){ if(saved[j.id].status!=="saved"&&!confirm("Remove this job from your tracker? Its status and notes will be deleted."))return; delete saved[j.id] }
+  else saved[j.id]={job:{title:j.title,company:j.company,location:j.location,url:j.url,posted:j.posted},status:"saved",notes:"",saved_on:today(),applied_on:"",updated:today()};
+  persist(); render();
+}
+function setStatus(id,st){
+  const s=saved[id]; if(!s)return; s.status=st; s.updated=today();
+  if(st!=="saved"&&!s.applied_on&&st!=="withdrawn") s.applied_on=today();
+  persist(); renderTracker(); render();
+}
+function renderTracker(){
+  const ids=Object.keys(saved), live=new Set(JOBS.map(j=>j.id));
+  const counts={all:ids.length}; STATUSES.forEach(([k])=>counts[k]=0); ids.forEach(id=>counts[saved[id].status]=(counts[saved[id].status]||0)+1);
+  const stats=$("stats"); stats.replaceChildren();
+  [["all","All"],...STATUSES].forEach(([k,label])=>{
+    const b=el("button"); b.type="button"; b.setAttribute("aria-pressed",String(statusFilter===k));
+    b.append(el("b",null,String(counts[k]||0)), document.createTextNode(label));
+    b.addEventListener("click",()=>{statusFilter=k; renderTracker()}); stats.append(b);
+  });
+  const order=Object.fromEntries(STATUSES.map(([k],i)=>[k,i]));
+  const rows=ids.filter(id=>statusFilter==="all"||saved[id].status===statusFilter)
+    .sort((a,b)=>order[saved[a].status]-order[saved[b].status]||(saved[b].updated||"").localeCompare(saved[a].updated||""));
+  const list=$("tlist"); list.replaceChildren();
+  if(!rows.length){list.append(el("div","empty",ids.length?"No saved jobs with this status.":"No saved jobs yet. Use the Save button on any listing in Search."));return}
+  for(const id of rows){
+    const s=saved[id], j=s.job, card=el("article","job"), grid=el("div","trow"), left=el("div"), right=el("div");
+    const h=el("h2"), href=safeUrl(j.url);
+    if(href){const a=el("a",null,j.title); a.href=href; a.target="_blank"; a.rel="noopener noreferrer"; h.append(a)} else h.textContent=j.title;
+    left.append(h, el("div","meta",[j.company,j.location,"saved "+s.saved_on].filter(Boolean).join(", ")));
+    if(!live.has(id)) left.append(el("div","gone","No longer in today's listings (it may have been filled or closed)."));
+    const nl=el("label","small-label","Notes"); const ta=el("textarea"); ta.value=s.notes||""; ta.id="n_"+id.replace(/\W/g,"_"); nl.htmlFor=ta.id;
+    ta.placeholder="Contacts, interview dates, follow-ups..."; ta.addEventListener("input",()=>{s.notes=ta.value; s.updated=today(); persist()});
+    left.append(nl, ta);
+    const sl=el("label","small-label","Status"), sel=el("select"); sel.id="s_"+id.replace(/\W/g,"_"); sl.htmlFor=sel.id;
+    STATUSES.forEach(([k,label])=>{const o=el("option",null,label); o.value=k; if(k===s.status)o.selected=true; sel.append(o)});
+    sel.addEventListener("change",()=>setStatus(id,sel.value));
+    const dl=el("label","small-label","Date applied"), di=document.createElement("input"); di.type="date"; di.value=s.applied_on||""; di.id="d_"+id.replace(/\W/g,"_"); dl.htmlFor=di.id;
+    di.addEventListener("change",()=>{s.applied_on=di.value; persist()});
+    const rm=el("button","ghost small","Remove"); rm.type="button"; rm.style.marginTop="10px";
+    rm.addEventListener("click",()=>{if(confirm("Remove this job and its notes from your tracker?")){delete saved[id]; persist(); renderTracker(); render()}});
+    right.append(sl, sel, dl, di, rm);
+    grid.append(left, right); card.append(grid); list.append(card);
+  }
+}
+function showView(v){
+  const t=v==="saved"; $("searchView").hidden=t; $("tracker").hidden=!t;
+  $("tabSearch").setAttribute("aria-selected",String(!t)); $("tabSaved").setAttribute("aria-selected",String(t));
+  if(t) renderTracker(); else render();
+  if(location.hash!==(t?"#saved":"")) history.replaceState(null,"",t?"#saved":location.pathname+location.search);
+}
+function exportBackup(){
+  const blob=new Blob([JSON.stringify({version:1,exported:today(),saved},null,1)],{type:"application/json"});
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="job-finder-backup-"+today()+".json"; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+}
+async function importBackup(file){
+  try{
+    const data=JSON.parse(await file.text()), inc=data&&data.saved;
+    if(!inc||typeof inc!=="object") throw new Error("not a Job Finder backup");
+    let n=0; for(const [id,s] of Object.entries(inc)){ if(s&&s.job&&STATUSNAME[s.status]){ if(!saved[id]||(s.updated||"")>=(saved[id].updated||"")){saved[id]=s; n++} } }
+    persist(); renderTracker(); render(); alert("Restored "+n+" saved jobs.");
+  }catch(e){alert("That file could not be read as a Job Finder backup.")}
+}
 function el(tag,cls,text){const e=document.createElement(tag); if(cls)e.className=cls; if(text!=null)e.textContent=text; return e}
 
 function render(){
   const q=$("q").value.toLowerCase().split(/\s+/).filter(Boolean), maxY=+$("yrs").value, unk=$("unkYrs").checked,
-        maxD=+$("deg").value, fld=$("fld").value, clr=$("clr").value, local=$("local").checked;
+        maxD=+$("deg").value, fld=$("fld").value, clr=$("clr").value, local=$("local").checked, onlyNew=$("onlyNew").checked, showHidden=$("showHidden").checked;
   let out=JOBS.filter(j=>{
     const hay=(j.title+" "+j.company+" "+j.location+" "+j.text).toLowerCase();
     if(!q.every(w=>hay.includes(w)))return false;
@@ -185,17 +324,33 @@ function render(){
     if(!["notactive","any"].includes(clr)&&j.clearance_tag!==clr)return false;
     if(excluded.has(j.company))return false;
     if(local&&!LOCAL.test(j.location))return false;
+    if(onlyNew&&!newIds.has(j.id))return false;
+    if(!showHidden&&isHidden(j))return false;
     return true});
   const s=$("sort").value;
   out.sort((a,b)=> s==="fit"?(fit.get(b.id)||0)-(fit.get(a.id)||0) : s==="yrs"?(a.years_min??99)-(b.years_min??99) : (b.posted||"").localeCompare(a.posted||""));
   $("count").textContent=out.length+" of "+JOBS.length+" listings";
+  $("hiddenCount").textContent=JOBS.filter(isHidden).length;
+  const nNew=JOBS.filter(j=>newIds.has(j.id)&&!isHidden(j)).length;
+  $("newInfo").textContent=prevIds?(nNew?"· "+nNew+" new since your last visit":"· nothing new since your last visit"):"· first visit: new jobs will be marked from next time";
+  $("seenBtn").hidden=!newIds.size;
   const list=$("list"); list.replaceChildren();
-  if(!out.length){list.append(el("div","empty","No listings match. Try raising the years limit or setting clearance to Any."));return}
+  if(!out.length){list.append(el("div","empty",onlyNew?"No new jobs match your filters since your last visit.":"No listings match. Try raising the years limit or setting clearance to Any."));return}
   for(const j of out){
     const card=el("article","job"), h=el("h2"), href=safeUrl(j.url);
     if(href){const a=el("a",null,j.title); a.href=href; a.target="_blank"; a.rel="noopener noreferrer"; h.append(a)} else h.textContent=j.title;
-    card.append(h, el("div","meta",[j.company,j.location,j.posted].filter(Boolean).join(", ")));
+    const head=el("div","jobhead"), sv=saved[j.id];
+    const sb=el("button","star"+(sv?" on":""), sv?"★ "+STATUSNAME[sv.status]:"☆ Save"); sb.type="button";
+    sb.setAttribute("aria-pressed",String(!!sv)); sb.setAttribute("aria-label",(sv?"Saved: ":"Save ")+j.title);
+    sb.addEventListener("click",()=>toggleSave(j));
+    const hid=isHidden(j), hb=el("button","hidebtn",hid?"Unhide":"✕ Hide"); hb.type="button";
+    hb.setAttribute("aria-label",(hid?"Unhide ":"Hide ")+j.title); hb.title=hid?"Show this job in search again":"Not interested: hide this job from search";
+    hb.addEventListener("click",()=>toggleHide(j));
+    if(hid) card.classList.add("dim");
+    const btns=el("div","btns"); btns.append(sb, hb);
+    head.append(h, btns); card.append(head, el("div","meta",[j.company,j.location,j.posted].filter(Boolean).join(", ")));
     const tags=el("div","tags");
+    if(newIds.has(j.id)) tags.append(el("span","tag new","NEW"));
     if(fit.has(j.id)) tags.append(el("span","tag fit","Fit "+fit.get(j.id)+"%"));
     const yr=j.years_min==null?"Years not stated":(j.years_max&&j.years_max!==j.years_min?j.years_min+"-"+j.years_max+" years":j.years_min===0?"No experience required":j.years_min+"+ years");
     const jf=(j.degree_fields||[]).map(f=>FLDNAME[f]).filter(Boolean);
@@ -214,17 +369,25 @@ async function init(){
   try{const r=await fetch("jobs.json",{cache:"no-store"}); if(!r.ok)throw 0; JOBS=await r.json()}
   catch(e){JOBS=SAMPLE; sample=true}
   if(sample){const n=$("notice"); n.style.display="block"; n.textContent="Showing fake sample listings. Real listings appear once the collectors have produced jobs.json."}
+  if(!sample) startVisit();
   buildCompanies();
-  for(const id of ["q","yrs","unkYrs","deg","fld","clr","local","sort"]) $(id).addEventListener(id==="q"?"input":"change",render);
+  for(const id of ["q","yrs","unkYrs","deg","fld","clr","local","sort","onlyNew","showHidden"]) $(id).addEventListener(id==="q"?"input":"change",render);
   $("allBtn").addEventListener("click",()=>{
     $("q").value=""; $("yrs").value="99"; $("unkYrs").checked=true; $("deg").value="4"; $("fld").value="any";
-    $("clr").value="any"; $("local").checked=false; excluded.clear(); saveExcluded(); buildCompanies(); render();
+    $("clr").value="any"; $("local").checked=false; $("onlyNew").checked=false; excluded.clear(); saveExcluded(); buildCompanies(); render();
   });
   $("coAll").addEventListener("click",()=>{excluded.clear(); saveExcluded(); buildCompanies(); render()});
   $("coNone").addEventListener("click",()=>{Object.keys(companyCounts()).forEach(n=>excluded.add(n)); saveExcluded(); buildCompanies(); render()});
   $("fitBtn").addEventListener("click",score);
+  $("seenBtn").addEventListener("click",markAllSeen);
+  $("tabSearch").addEventListener("click",()=>showView("search"));
+  $("tabSaved").addEventListener("click",()=>showView("saved"));
+  $("exportBtn").addEventListener("click",exportBackup);
+  $("importFile").addEventListener("change",e=>{if(e.target.files[0])importBackup(e.target.files[0]); e.target.value=""});
+  window.addEventListener("storage",e=>{if(e.key==="jf_saved"){try{saved=JSON.parse(e.newValue||"{}")}catch(x){}; persist(); render(); if(!$("tracker").hidden)renderTracker()}});
+  persist();
   $("clrBtn").addEventListener("click",()=>{$("resume").value=""; fit.clear(); if($("sort").value==="fit")$("sort").value="new"; render()});
-  render();
+  showView(location.hash==="#saved"?"saved":"search");
 }
 init();
 </script>

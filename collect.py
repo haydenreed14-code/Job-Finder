@@ -11,7 +11,7 @@ OUT = "jobs.json"
 UA = "JobFinderPersonal/1.0 (personal job search; public pages only)"
 DELAY = 1.5          # seconds between requests
 MAX_TEXT = 8000      # characters of description kept per listing (extraction always uses the full text)
-VER = 4              # bump when extraction rules change so old listings get re-read
+VER = 5              # bump when extraction rules change so old listings get re-read
 LOCAL = re.compile(r"huntsville|madison|redstone|decatur|athens|harvest|hazel green|new market|owens cross roads|meridianville", re.I)
 TODAY = datetime.date.today().isoformat()
 
@@ -213,6 +213,15 @@ def collect_applicantpro_api(host, known, client_id=None):
             continue
         text = strip_html(d.get("description") or d.get("jobDescription") or "")
         posted = str(d.get("datePosted") or d.get("postedDate") or "")[:10]
+        if str(jid).isdigit():  # the full description comes from a separate data address, not the job page
+            try:
+                det = (fetch_json(f"https://{host}/core/jobs/{client_id}/{jid}/job-details") or {}).get("data") or {}
+                full = strip_html(det.get("description") or det.get("advertisingDescriptionHtml") or det.get("advertisingDescription") or "")
+                if len(full) > len(text):
+                    text = full
+                title = title or det.get("title", "")
+            except Exception:
+                pass
         if not text and u.rstrip("/") != f"https://{host}/jobs":
             try:
                 t2, l2, p2, text = get_detail(u)
